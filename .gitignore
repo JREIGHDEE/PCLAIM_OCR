@@ -1,0 +1,21 @@
+# Virtual environment
+venv/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+
+# VS Code
+.vscode/
+
+# Environment variables
+.env
+
+# Generated files
+uploads/
+debug_cells/
+
+# OS
+Thumbs.db
+.DS_Store

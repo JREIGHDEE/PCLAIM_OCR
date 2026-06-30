@@ -1,0 +1,1024 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>PClaimAssist OCR</title>
+
+<link
+rel="stylesheet"
+href="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.css"
+/>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cropperjs/1.6.2/cropper.min.js"></script>
+<style>
+
+body{
+    font-family:Arial;
+    margin:20px;
+}
+
+.container{
+    display:grid;
+    grid-template-columns:1fr 1fr;
+    gap:20px;
+}
+
+.box{
+    border:1px solid #ddd;
+    border-radius:10px;
+    padding:20px;
+}
+
+video,img{
+    width:100%;
+}
+
+#preview{
+    cursor: grab;
+}
+
+textarea{
+    width:100%;
+    height:250px;
+}
+
+table{
+    width:100%;
+    border-collapse:collapse;
+}
+
+th,td{
+    border:1px solid #ddd;
+    padding:8px;
+}
+
+button{
+    padding:10px;
+    margin-top:10px;
+    cursor:pointer;
+}
+
+.grid-line {
+    position:absolute;
+    top:0;
+    bottom:0;
+    width:4px;
+    background:rgba(255,0,0,0.75);
+    cursor:ew-resize;
+    z-index:3;
+    pointer-events:auto;
+}
+
+.grid-line-handle {
+    position:absolute;
+    left:-6px;
+    top:0;
+    width:16px;
+    height:100%;
+    cursor:ew-resize;
+}
+
+.grid-line-hover {
+    background:rgba(255,0,0,1);
+}
+
+</style>
+</head>
+<body>
+
+<h1>PClaimAssist OCR</h1>
+
+<div class="container">
+
+<div class="box">
+
+<h2>Upload File</h2>
+
+<input
+type="file"
+id="uploadInput"
+accept=".pdf,image/*">
+
+<button onclick="uploadImage()">
+Upload & OCR
+</button>
+
+<div style="margin-top:15px;">
+    <label for="fieldCategory">Training field:</label>
+    <select id="fieldCategory" style="margin-left:10px; min-width:220px;">
+        <option value="">Select field category</option>
+        <option value="CASE #">CASE #</option>
+        <option value="DATE & TIME OF ADMISSION">DATE & TIME OF ADMISSION</option>
+        <option value="NAME">NAME</option>
+        <option value="BDAY">BDAY</option>
+        <option value="ADDRESS">ADDRESS</option>
+        <option value="ADMITTING DIAGNOSIS">ADMITTING DIAGNOSIS</option>
+        <option value="DATE & TIME OF DELIVERY">DATE & TIME OF DELIVERY</option>
+        <option value="FINAL DIAGNOSIS">FINAL DIAGNOSIS</option>
+        <option value="DATE & TIME OF DISCHARGE">DATE & TIME OF DISCHARGE</option>
+    </select>
+    <button onclick="saveCroppedField()" style="margin-left:10px;">Save Cropped Field</button>
+    <span id="saveStatus" style="margin-left:10px; color: green;"></span>
+</div>
+
+<hr>
+
+<h2>Crop Area</h2>
+
+<div
+id="previewContainer"
+style="
+position:relative;
+width:100%;
+height:600px;
+overflow:hidden;
+border:1px solid #ccc;
+"
+>
+
+<img
+id="preview"
+style="
+max-width:100%;
+display:block;
+"
+>
+
+<div id="gridOverlay" style="position:absolute; top:0; left:0; right:0; bottom:0; pointer-events:none; z-index:2;"></div>
+
+</div>
+
+<br>
+
+<div style="margin-bottom:10px; display:flex; flex-wrap:wrap; gap:10px; align-items:center;">
+    <button onclick="enableRowGridMode()">Row Grid Mode</button>
+    <button onclick="autoDetectColumns()">Auto Detect Columns</button>
+    <button onclick="addVerticalLine()">Add Vertical Line</button>
+    <button onclick="resetGridLines()">Reset Grid</button>
+    <button onclick="cropRowCells()">Crop Row Cells</button>
+    <button onclick="cropAndOCR()">Crop Selection & OCR</button>
+</div>
+<div id="segmentEditor" style="margin-bottom:10px;"></div>
+
+<button onclick="cropper?.zoom(0.2)">
+Zoom In
+</button>
+
+<button onclick="cropper?.zoom(-0.2)">
+Zoom Out
+</button>
+
+<button onclick="cropper?.rotate(90)">
+Rotate
+</button>
+
+<button onclick="cropper?.reset()">
+Reset
+</button>
+
+<div id="pdfNav" style="display:none; margin-top:10px;">
+<button onclick="prevPage()">Previous Page</button>
+<span id="pageIndicator" style="margin:0 10px;">Page 0 / 0</span>
+<button onclick="nextPage()">Next Page</button>
+</div>
+
+</div>
+
+<div class="box">
+
+<h2>Raw OCR Output</h2>
+
+<textarea id="output" readonly></textarea>
+
+<h2>Review & Edit</h2>
+<p>Correct the OCR text below before saving. Results for one case are stored together and can be exported to Excel.</p>
+<div style="display:grid; gap:8px; margin-bottom:10px;">
+    <input id="caseIdInput" placeholder="Case ID" style="padding:8px;" />
+    <input id="caseNameInput" placeholder="Case Name (optional)" style="padding:8px;" />
+</div>
+<textarea id="reviewText" style="height:220px;"></textarea>
+<div style="display:flex; align-items:center; gap:10px; margin-top:10px; flex-wrap:wrap;">
+    <button onclick="saveReviewedResult()">Save Reviewed Result</button>
+    <button onclick="exportCaseSession()">Export Case to Excel</button>
+    <span id="reviewStatus" style="color:green;"></span>
+</div>
+
+<h2>Detected Tokens</h2>
+<div id="ocrCategorySummary" style="margin-bottom:10px; font-weight:bold;"></div>
+
+<table>
+
+<thead>
+<tr>
+<th>Field Type</th>
+<th>Text</th>
+<th>Confidence</th>
+</tr>
+</thead>
+
+<tbody id="tableBody">
+
+</tbody>
+
+</table>
+
+</div>
+
+</div>
+
+<canvas
+id="canvas"
+style="display:none">
+</canvas>
+
+<script>
+let cropper = null;
+let pdfDoc = null;
+let pdfCurrentPage = 1;
+let pdfPageCount = 0;
+let pdfFileData = null;
+let originalPreviewURL = null;
+let rowGridMode = false;
+let gridLines = [];
+let segmentInfo = [];
+let activeGridLine = null;
+let gridOverlay = null;
+let isDraggingGridLine = false;
+let containerRect = null;
+const trainingCategories = [
+    "CASE #",
+    "DATE & TIME OF ADMISSION",
+    "NAME",
+    "BDAY",
+    "ADDRESS",
+    "ADMITTING DIAGNOSIS",
+    "DATE & TIME OF DELIVERY",
+    "FINAL DIAGNOSIS",
+    "DATE & TIME OF DISCHARGE"
+];
+const segmentColors = [
+    "#ef476f",
+    "#ffd166",
+    "#06d6a0",
+    "#118ab2",
+    "#073b4c",
+    "#fb8500",
+    "#8338ec",
+    "#ff5d8f",
+    "#00b4d8"
+];
+
+function getStartCategoryIndex(){
+    const selectedCategory = document.getElementById("fieldCategory").value.trim();
+    const selectedIndex = trainingCategories.indexOf(selectedCategory);
+    return selectedIndex !== -1 ? selectedIndex : 0;
+}
+
+function ensureSegmentInfo(){
+    const targetCount = gridLines.length + 1;
+    const startIndex = getStartCategoryIndex();
+    const newInfo = [];
+
+    for(let i = 0; i < targetCount; i++){
+        const defaultCategory = trainingCategories[startIndex + i] || `ROW_CELL_${i + 1}`;
+        const existing = segmentInfo[i] || {};
+        newInfo[i] = {
+            color: existing.color || segmentColors[i % segmentColors.length],
+            category: existing.category || defaultCategory
+        };
+    }
+    segmentInfo = newInfo;
+}
+
+function updateSegmentEditor(){
+    const container = document.getElementById("segmentEditor");
+    if(!container) return;
+    container.innerHTML = "";
+    ensureSegmentInfo();
+
+    const title = document.createElement("div");
+    title.textContent = "Row segment colors and category mapping:";
+    title.style.fontWeight = "bold";
+    title.style.marginBottom = "6px";
+    container.appendChild(title);
+
+    segmentInfo.forEach((segment, index) => {
+        const row = document.createElement("div");
+        row.style.display = "flex";
+        row.style.alignItems = "center";
+        row.style.gap = "8px";
+        row.style.marginBottom = "6px";
+
+        const swatch = document.createElement("input");
+        swatch.type = "color";
+        swatch.value = segment.color;
+        swatch.title = `Segment ${index + 1} color`;
+        swatch.addEventListener("input", event => {
+            segmentInfo[index].color = event.target.value;
+            renderGridLines();
+        });
+
+        const label = document.createElement("span");
+        label.textContent = `Segment ${index + 1}`;
+        label.style.minWidth = "80px";
+
+        const select = document.createElement("select");
+        trainingCategories.forEach(cat => {
+            const option = document.createElement("option");
+            option.value = cat;
+            option.textContent = cat;
+            if(cat === segment.category){
+                option.selected = true;
+            }
+            select.appendChild(option);
+        });
+        select.addEventListener("change", event => {
+            segmentInfo[index].category = event.target.value;
+        });
+
+        row.appendChild(swatch);
+        row.appendChild(label);
+        row.appendChild(select);
+        container.appendChild(row);
+    });
+}
+
+const preview = document.getElementById("preview");
+const previewContainer = document.getElementById("previewContainer");
+const gridOverlayElement = document.getElementById("gridOverlay");
+const pdfNav = document.getElementById("pdfNav");
+const pageIndicator = document.getElementById("pageIndicator");
+
+preview.addEventListener("contextmenu", e => e.preventDefault());
+preview.addEventListener("mousedown", e => {
+    if(e.button === 2 && cropper){
+        isRightMouseDown = true;
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+        preview.style.cursor = "grabbing";
+    }
+});
+preview.addEventListener("mousemove", e => {
+    if(isRightMouseDown && cropper){
+        const dx = e.clientX - lastMouseX;
+        const dy = e.clientY - lastMouseY;
+        cropper.move(dx, dy);
+        lastMouseX = e.clientX;
+        lastMouseY = e.clientY;
+    }
+});
+preview.addEventListener("mouseup", e => {
+    if(e.button === 2 && isRightMouseDown){
+        isRightMouseDown = false;
+        preview.style.cursor = "grab";
+    }
+});
+preview.addEventListener("mouseleave", () => {
+    if(isRightMouseDown){
+        isRightMouseDown = false;
+        preview.style.cursor = "grab";
+    }
+});
+
+function initCropper(){
+    const previewEl = document.getElementById("preview");
+    if(cropper){
+        cropper.destroy();
+    }
+    cropper = new Cropper(previewEl, {
+        viewMode:1,
+        dragMode: rowGridMode ? "crop" : "move",
+        autoCropArea:0.2,
+        zoomable:true,
+        scalable:true,
+        movable:true,
+        responsive:true,
+        wheelZoomRatio:0.1,
+        cropend: () => updateGridOverlay()
+    });
+    setupGridOverlay();
+}
+
+function updatePreviewDisplay(){
+    const previewEl = document.getElementById("preview");
+    if(!originalPreviewURL) return;
+    previewEl.onload = ()=> initCropper();
+    previewEl.onerror = ()=> alert("Failed to load preview image.");
+    previewEl.src = originalPreviewURL;
+}
+
+function setupGridOverlay(){
+    if(gridOverlay) return;
+    gridOverlay = gridOverlayElement;
+    window.addEventListener("pointermove", onPointerMove);
+    window.addEventListener("pointerup", onPointerUp);
+}
+
+function updateGridOverlay(){
+    if(!gridOverlay) return;
+    renderGridLines();
+}
+
+function onPointerMove(event){
+    if(!isDraggingGridLine || !activeGridLine) return;
+    if(!containerRect){
+        containerRect = previewContainer.getBoundingClientRect();
+    }
+
+    const cropData = cropper.getCropBoxData();
+    const minLeft = cropData.left;
+    const maxLeft = cropData.left + cropData.width;
+    let x = event.clientX - containerRect.left;
+    x = Math.max(minLeft, Math.min(maxLeft, x));
+    const percent = Math.min(Math.max((x - cropData.left) / cropData.width, 0.01), 0.99);
+    const index = Number(activeGridLine.dataset.index);
+    if(!Number.isNaN(index)){
+        gridLines[index] = percent;
+    }
+    renderGridLines();
+}
+
+function onPointerUp(){
+    if(isDraggingGridLine){
+        isDraggingGridLine = false;
+        activeGridLine = null;
+    }
+}
+
+function renderGridLines(){
+    if(!cropper || !gridOverlay) return;
+    const cropData = cropper.getCropBoxData();
+    const lines = Array.from(gridOverlay.children).filter(el => el.classList.contains("grid-line"));
+    lines.forEach(line => line.remove());
+
+    gridLines = gridLines.sort((a,b) => a - b);
+    ensureSegmentInfo();
+
+    gridLines.forEach((percent, i) => {
+        const left = cropData.left + percent * cropData.width;
+        const line = document.createElement("div");
+        line.className = "grid-line";
+        line.style.left = `${left - 2}px`;
+        line.style.background = segmentInfo[i + 1]?.color || segmentColors[(i + 1) % segmentColors.length];
+        line.dataset.percent = percent;
+        line.dataset.index = i;
+        line.addEventListener("pointerdown", event => {
+            event.preventDefault();
+            isDraggingGridLine = true;
+            activeGridLine = event.currentTarget;
+        });
+        gridOverlay.appendChild(line);
+    });
+    updateSegmentEditor();
+}
+
+function resetGridLines(){
+    gridLines = [];
+    segmentInfo = [];
+    gridOverlay.innerHTML = "";
+    updateSegmentEditor();
+}
+
+function addVerticalLine(){
+    if(!cropper){
+        alert("Load an image first.");
+        return;
+    }
+
+    const defaultPercent = gridLines.length ? Math.min(...gridLines) / 2 : 0.5;
+    gridLines.push(defaultPercent);
+    ensureSegmentInfo();
+    renderGridLines();
+}
+
+async function autoDetectColumns(){
+    if(!cropper){
+        alert("Load an image first.");
+        return;
+    }
+
+    const rowCanvas = cropper.getCroppedCanvas({
+        imageSmoothingEnabled:true,
+        imageSmoothingQuality:"high"
+    });
+
+    const blob = await new Promise(resolve => rowCanvas.toBlob(resolve, "image/png"));
+    if(!blob){
+        alert("Unable to capture row for detection.");
+        return;
+    }
+
+    const formData = new FormData();
+    formData.append("image", blob, "row.png");
+
+    const response = await fetch("/detect_row_columns", {
+        method: "POST",
+        body: formData
+    });
+
+    const data = await response.json();
+    if(!data.success){
+        alert(data.error || "Column detection failed.");
+        return;
+    }
+
+    gridLines = Array.isArray(data.columns) ? data.columns : [];
+    ensureSegmentInfo();
+    renderGridLines();
+    alert("Column detection completed. Adjust the red lines if needed.");
+}
+
+function enableRowGridMode(){
+    rowGridMode = true;
+    if(cropper){
+        cropper.setDragMode("crop");
+    }
+    alert("Row grid mode enabled. Draw a row selection with Cropper, then add/adjust vertical lines.");
+}
+
+function getRowCropPercents(){
+    if(!cropper) return [];
+    const cropData = cropper.getCropBoxData();
+    return gridLines.map(percent => Math.min(Math.max(percent, 0), 1)).sort((a,b) => a - b);
+}
+
+async function cropRowCells(){
+    if(!cropper){
+        alert("Load an image first.");
+        return;
+    }
+
+    const cropData = cropper.getCropBoxData();
+    if(cropData.width < 10 || cropData.height < 10){
+        alert("Draw a row selection first.");
+        return;
+    }
+
+    const rowCanvas = cropper.getCroppedCanvas({
+        imageSmoothingEnabled:true,
+        imageSmoothingQuality:"high"
+    });
+
+    const percents = [0, ...getRowCropPercents(), 1];
+    const cells = [];
+    for(let i = 0; i < percents.length - 1; i++){
+        const leftPercent = percents[i];
+        const rightPercent = percents[i+1];
+        const cellX = Math.round(leftPercent * rowCanvas.width);
+        const cellWidth = Math.round((rightPercent - leftPercent) * rowCanvas.width);
+        if(cellWidth < 5) continue;
+        const cellCanvas = document.createElement("canvas");
+        cellCanvas.width = cellWidth;
+        cellCanvas.height = rowCanvas.height;
+        const ctx = cellCanvas.getContext("2d");
+        ctx.drawImage(rowCanvas, cellX, 0, cellWidth, rowCanvas.height, 0, 0, cellWidth, rowCanvas.height);
+        cells.push({canvas: cellCanvas, index: i + 1});
+    }
+
+    if(cells.length === 0){
+        alert("No cells found. Add at least one vertical line.");
+        return;
+    }
+
+    const combinedText = [];
+    const tbody = document.getElementById("tableBody");
+    tbody.innerHTML = "";
+
+    for(const cell of cells){
+        await new Promise(resolve => cell.canvas.toBlob(async blob => {
+            const category = segmentInfo[cell.index - 1]?.category || `ROW_CELL_${cell.index}`;
+            const formData = new FormData();
+            formData.append("image", blob, `cell-${cell.index}.png`);
+            formData.append("category", category);
+            const response = await fetch("/ocr", {
+                method: "POST",
+                body: formData
+            });
+            const data = await response.json();
+            if(!data.success){
+                alert(`OCR failed for cell ${cell.index}: ${data.error}`);
+                resolve();
+                return;
+            }
+            const cellText = data.raw_text;
+            combinedText.push(cellText);
+            document.getElementById("output").value = combinedText.join("\n---\n");
+            document.getElementById("reviewText").value = combinedText.join("\n---\n");
+            tbody.innerHTML += `
+                <tr>
+                    <td>${escapeHtml(category)}</td>
+                    <td>Cell ${cell.index}</td>
+                    <td contenteditable="true">${escapeHtml(cellText)}</td>
+                    <td>${data.tokens.length ? escapeHtml(data.tokens[0].confidence) : ""}</td>
+                </tr>
+            `;
+            resolve();
+        }, "image/png"));
+    }
+
+    const headerRow = document.querySelector("#tableBody").previousElementSibling.querySelector("tr");
+    if(headerRow){
+        headerRow.innerHTML = "<th>Field Type</th><th>Cell</th><th>Text</th><th>Confidence</th>";
+    }
+}
+
+function escapeHtml(value){
+    return String(value)
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/\"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+}
+
+function getSelectedCategory(){
+    const category = document.getElementById("fieldCategory").value.trim();
+    if(!category){
+        alert("Select a training field category before OCR.");
+        return null;
+    }
+    return category;
+}
+
+async function ensurePDFJS(){
+    if(window.pdfjsLib){
+        return window.pdfjsLib;
+    }
+
+    return new Promise((resolve,reject)=>{
+        const script = document.createElement("script");
+        script.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js";
+        script.onload = ()=>{
+            if(window.pdfjsLib){
+                resolve(window.pdfjsLib);
+            } else {
+                reject(new Error("PDF.js loaded but pdfjsLib is unavailable."));
+            }
+        };
+        script.onerror = (error)=>{
+            reject(error || new Error("Failed to load PDF.js script."));
+        };
+        document.head.appendChild(script);
+    });
+}
+
+function updatePdfNav(){
+    const show = pdfDoc && pdfPageCount > 0;
+    if(!pdfNav) return;
+    pdfNav.style.display = show ? "block" : "none";
+    if(show && pageIndicator){
+        pageIndicator.textContent = `Page ${pdfCurrentPage} / ${pdfPageCount}`;
+    }
+}
+
+function resetPdfState(){
+    pdfDoc = null;
+    pdfCurrentPage = 1;
+    pdfPageCount = 0;
+    pdfFileData = null;
+    updatePdfNav();
+}
+
+async function renderPDFPage(pageNumber){
+    if(!pdfDoc) return;
+    const page = await pdfDoc.getPage(pageNumber);
+    const unscaledViewport = page.getViewport({scale:1});
+    const maxWidth = 4096;
+    const defaultScale = Math.max(3, (window.devicePixelRatio || 1) * 3);
+    let scale = defaultScale;
+    if(unscaledViewport.width * scale > maxWidth){
+        scale = maxWidth / unscaledViewport.width;
+    }
+    const viewport = page.getViewport({scale});
+
+    const canvas = document.getElementById("canvas");
+    canvas.width = viewport.width;
+    canvas.height = viewport.height;
+    const ctx = canvas.getContext("2d");
+
+    await page.render({canvasContext: ctx, viewport}).promise;
+
+    const previewEl = document.getElementById("preview");
+    const pageImage = canvas.toDataURL("image/png");
+    if(originalPreviewURL && originalPreviewURL.startsWith("blob:")){
+        URL.revokeObjectURL(originalPreviewURL);
+    }
+    originalPreviewURL = pageImage;
+    updatePreviewDisplay();
+}
+
+async function nextPage(){
+    if(!pdfDoc) return;
+    if(pdfCurrentPage < pdfPageCount){
+        pdfCurrentPage += 1;
+        await renderPDFPage(pdfCurrentPage);
+        updatePdfNav();
+    }
+}
+
+async function prevPage(){
+    if(!pdfDoc) return;
+    if(pdfCurrentPage > 1){
+        pdfCurrentPage -= 1;
+        await renderPDFPage(pdfCurrentPage);
+        updatePdfNav();
+    }
+}
+
+async function sendToOCR(file){
+
+    const category = getSelectedCategory();
+    if(!category){
+        return;
+    }
+
+    const formData =
+    new FormData();
+
+    formData.append(
+        "image",
+        file
+    );
+    formData.append(
+        "category",
+        category
+    );
+
+    const response =
+    await fetch(
+        "/ocr",
+        {
+            method:"POST",
+            body:formData
+        }
+    );
+
+    const data =
+    await response.json();
+
+    if(!data.success){
+
+        alert(data.error);
+        return;
+    }
+
+    document
+    .getElementById("output")
+    .value =
+    data.raw_text;
+
+    document
+    .getElementById("reviewText")
+    .value =
+    data.raw_text;
+
+    const summaryEl = document.getElementById("ocrCategorySummary");
+    summaryEl.textContent = `Field type: ${escapeHtml(data.category || category)}`;
+
+    const tbody =
+    document
+    .getElementById("tableBody");
+
+    tbody.innerHTML = "";
+
+    data.tokens.forEach(token=>{
+
+        tbody.innerHTML += `
+        <tr>
+            <td>${escapeHtml(token.category || data.category || "")}</td>
+            <td>${escapeHtml(token.text || "")}</td>
+            <td>${escapeHtml(token.confidence ?? "")}</td>
+        </tr>
+        `;
+    });
+}
+
+async function saveReviewedResult(){
+    const caseId = document.getElementById("caseIdInput").value.trim();
+    if(!caseId){
+        alert("Enter a case ID before saving.");
+        return;
+    }
+
+    const reviewStatus = document.getElementById("reviewStatus");
+    const formData = new FormData();
+    formData.append("case_id", caseId);
+    formData.append("case_name", document.getElementById("caseNameInput").value.trim());
+
+    const rows = Array.from(document.querySelectorAll("#tableBody tr"));
+    if(rows.length > 0){
+        const reviewValues = {};
+        rows.forEach(row => {
+            const cells = row.querySelectorAll("td");
+            const category = cells[0]?.textContent.trim();
+            const text = cells[2]?.textContent.trim();
+            if(category){
+                reviewValues[category] = text;
+            }
+        });
+        if(Object.keys(reviewValues).length > 0){
+            formData.append("review_values", JSON.stringify(reviewValues));
+        }
+    }
+
+    if(!formData.has("review_values")){
+        const category = getSelectedCategory();
+        if(!category){
+            return;
+        }
+        formData.append("category", category);
+        formData.append("reviewed_text", document.getElementById("reviewText").value);
+    }
+
+    const response = await fetch("/save_reviewed_result", {
+        method: "POST",
+        body: formData
+    });
+
+    const data = await response.json();
+    if(!data.success){
+        reviewStatus.style.color = "red";
+        reviewStatus.textContent = data.error || "Save failed";
+        return;
+    }
+
+    reviewStatus.style.color = "green";
+    reviewStatus.textContent = "Saved to case session.";
+}
+
+async function exportCaseSession(){
+    const caseId = document.getElementById("caseIdInput").value.trim();
+    if(!caseId){
+        alert("Enter a case ID before exporting.");
+        return;
+    }
+
+    window.location.href = `/export_case_session?case_id=${encodeURIComponent(caseId)}`;
+}
+
+async function uploadImage(){
+
+    const file =
+    document
+    .getElementById("uploadInput")
+    .files[0];
+
+    if(!file){
+        alert("Select a file");
+        return;
+    }
+
+    const preview =
+    document
+    .getElementById("preview");
+
+    if(file.type === "application/pdf" || file.name.toLowerCase().endsWith(".pdf")){
+        await renderPDFPreview(file);
+        return;
+    }
+
+    resetPdfState();
+
+    if(originalPreviewURL && originalPreviewURL.startsWith("blob:")){
+        URL.revokeObjectURL(originalPreviewURL);
+    }
+    originalPreviewURL = URL.createObjectURL(file);
+    updatePreviewDisplay();
+}
+
+async function renderPDFPreview(file){
+    try {
+        const arrayBuffer = await file.arrayBuffer();
+        const lib = await ensurePDFJS();
+
+        lib.GlobalWorkerOptions.workerSrc =
+        "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js";
+        lib.disableWorker = true;
+
+        const loadingTask = lib.getDocument({data: arrayBuffer});
+        pdfDoc = await loadingTask.promise;
+        pdfPageCount = pdfDoc.numPages;
+        pdfCurrentPage = 1;
+        pdfFileData = arrayBuffer;
+
+        await renderPDFPage(pdfCurrentPage);
+        updatePdfNav();
+    } catch(error) {
+        console.error("PDF rendering error", error);
+        alert("Failed to render PDF preview. Please try a different PDF file.");
+    }
+}
+
+async function cropAndOCR(){
+
+    if(!cropper){
+
+        alert(
+            "Upload image first"
+        );
+
+        return;
+    }
+
+    const canvas =
+    cropper.getCroppedCanvas({
+        imageSmoothingEnabled:true,
+        imageSmoothingQuality:"high"
+    });
+
+    canvas.toBlob(
+        async(blob)=>{
+            await sendToOCR(blob);
+        },
+        "image/png"
+    );
+}
+
+async function saveCroppedField(){
+    if(!cropper){
+        alert("Upload image first before saving a crop.");
+        return;
+    }
+
+    const category = document.getElementById("fieldCategory").value;
+    if(!category){
+        alert("Select a training field category first.");
+        return;
+    }
+
+    const canvas = cropper.getCroppedCanvas({
+        imageSmoothingEnabled:true,
+        imageSmoothingQuality:"high"
+    });
+
+    canvas.toBlob(
+        async(blob)=>{
+            const formData = new FormData();
+            formData.append("image", blob, "crop.png");
+            formData.append("category", category);
+
+            const response = await fetch("/save_crop", {
+                method: "POST",
+                body: formData
+            });
+
+            const data = await response.json();
+            const statusEl = document.getElementById("saveStatus");
+
+            if(!data.success){
+                statusEl.style.color = "red";
+                statusEl.textContent = "Save failed: " + (data.error || "Unknown error");
+                return;
+            }
+
+            statusEl.style.color = "green";
+            statusEl.textContent = "Crop saved for " + category + ".";
+        },
+        "image/png"
+    );
+}
+
+async function captureImage(){
+
+    const video =
+    document
+    .getElementById("video");
+
+    const canvas =
+    document
+    .getElementById("canvas");
+
+    canvas.width =
+    video.videoWidth;
+
+    canvas.height =
+    video.videoHeight;
+
+    const ctx =
+    canvas.getContext("2d");
+
+    ctx.drawImage(
+        video,
+        0,
+        0
+    );
+
+    canvas.toBlob(
+        async(blob)=>{
+
+            document
+            .getElementById("preview")
+            .src =
+            URL.createObjectURL(blob);
+
+            await sendToOCR(blob);
+
+        },
+        "image/jpeg"
+    );
+}
+
+</script>
+
+</body>
+</html>
